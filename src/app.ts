@@ -7,6 +7,8 @@ const CHART_DAYS = 30;
 
 type ISODate = string;
 type YesNo = 'yes' | 'no' | null;
+type Tone = 'good' | 'bad' | 'neutral';
+type ToneMap = { yes?: Tone; no?: Tone };
 
 type DietKey =
     | 'nonKetoFruits'
@@ -50,6 +52,10 @@ interface DayRecord {
     weightNight?: number;
     weightMorningMissed: boolean;
     weightNightMissed: boolean;
+    heartMorning?: number;
+    heartNight?: number;
+    heartMorningMissed: boolean;
+    heartNightMissed: boolean;
     weightLiftingDone: YesNo;
     waterFastDone: YesNo;
 }
@@ -94,6 +100,10 @@ const createEmptyDay = (date: ISODate): DayRecord => ({
     weightNight: undefined,
     weightMorningMissed: false,
     weightNightMissed: false,
+    heartMorning: undefined,
+    heartNight: undefined,
+    heartMorningMissed: false,
+    heartNightMissed: false,
     weightLiftingDone: null,
     waterFastDone: null,
 });
@@ -340,6 +350,58 @@ export class GoalTrackerApp extends LitElement {
         return value === next ? null : next;
     }
 
+    private renderEditIcon() {
+        return html`
+            <svg
+                class="icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            >
+                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                <path d="M12 20h9" />
+                <path
+                    d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1l1-4L16.5 3.5z"
+                />
+            </svg>
+        `;
+    }
+
+    private renderDoneIcon() {
+        return html`
+            <svg
+                class="icon"
+                viewBox="0 0 24 24"
+                aria-hidden="true"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+            >
+                <path stroke="none" d="M0 0h24v24H0z" fill="none" />
+                <path d="M5 12l5 5l10 -10" />
+            </svg>
+        `;
+    }
+
+    private renderEditToggle(
+        isEditing: boolean,
+        onToggle: () => void,
+        labels: { edit: string; done: string } = { edit: 'Edit', done: 'Done' },
+    ) {
+        return html`
+            <button class="ghost edit-toggle" type="button" @click=${onToggle}>
+                ${isEditing ? this.renderDoneIcon() : this.renderEditIcon()}
+                <span>${isEditing ? labels.done : labels.edit}</span>
+            </button>
+        `;
+    }
+
     private setDietValue(date: ISODate, key: DietKey, value: YesNo) {
         this.updateDay(date, (day) => ({
             ...day,
@@ -377,6 +439,20 @@ export class GoalTrackerApp extends LitElement {
         }));
     }
 
+    private setHeartValue(
+        date: ISODate,
+        key: 'heartMorning' | 'heartNight',
+        value: number | undefined,
+    ) {
+        const missedKey =
+            key === 'heartMorning' ? 'heartMorningMissed' : 'heartNightMissed';
+        this.updateDay(date, (day) => ({
+            ...day,
+            [key]: value,
+            [missedKey]: value !== undefined ? false : day[missedKey],
+        }));
+    }
+
     private toggleWeightMissed(
         date: ISODate,
         key: 'weightMorning' | 'weightNight',
@@ -395,6 +471,22 @@ export class GoalTrackerApp extends LitElement {
         });
     }
 
+    private toggleHeartMissed(
+        date: ISODate,
+        key: 'heartMorning' | 'heartNight',
+    ) {
+        const missedKey =
+            key === 'heartMorning' ? 'heartMorningMissed' : 'heartNightMissed';
+        this.updateDay(date, (day) => {
+            const nextMissed = !day[missedKey];
+            return {
+                ...day,
+                [missedKey]: nextMissed,
+                [key]: nextMissed ? undefined : day[key],
+            };
+        });
+    }
+
     private dietRulesAnswered(day: DayRecord): boolean {
         return DIET_RULES.every((rule) => day.diet[rule.key] !== null);
     }
@@ -403,13 +495,23 @@ export class GoalTrackerApp extends LitElement {
         return DIET_RULES.every((rule) => day.diet[rule.key] === 'no');
     }
 
-    private dietRequirementSatisfied(day: DayRecord): boolean {
-        return (
-            day.dietException === 'yes' ||
-            day.dessertPass === 'yes' ||
-            day.mealPass === 'yes' ||
-            this.dietRulesAllClear(day)
-        );
+    private dietRequirementSatisfied(day: DayRecord, date: ISODate): boolean {
+        if (day.dietException !== 'no') {
+            return false;
+        }
+
+        const dessertConflict =
+            day.dessertPass === 'yes' &&
+            Boolean(this.getPassConflict(date, 'dessertPass'));
+        const mealConflict =
+            day.mealPass === 'yes' &&
+            Boolean(this.getPassConflict(date, 'mealPass'));
+
+        if (dessertConflict || mealConflict) {
+            return false;
+        }
+
+        return true;
     }
 
     private isDietSectionComplete(day: DayRecord): boolean {
@@ -431,6 +533,14 @@ export class GoalTrackerApp extends LitElement {
         return weightMorningSet && weightNightSet;
     }
 
+    private isHeartSectionComplete(day: DayRecord): boolean {
+        const heartMorningSet =
+            Number.isFinite(day.heartMorning) || day.heartMorningMissed;
+        const heartNightSet =
+            Number.isFinite(day.heartNight) || day.heartNightMissed;
+        return heartMorningSet && heartNightSet;
+    }
+
     private isLiftingDay(date: ISODate): boolean {
         const weekKey = getWeekKey(parseDate(date));
         const plan = this.appState.weekPlans[weekKey];
@@ -446,6 +556,7 @@ export class GoalTrackerApp extends LitElement {
     private isDayComplete(day: DayRecord, date: ISODate): boolean {
         const dietSectionComplete = this.isDietSectionComplete(day);
         const weightsComplete = this.isWeightSectionComplete(day);
+        const heartComplete = this.isHeartSectionComplete(day);
 
         const liftingRequired = this.isLiftingDay(date);
         const liftingComplete =
@@ -457,6 +568,7 @@ export class GoalTrackerApp extends LitElement {
         return (
             dietSectionComplete &&
             weightsComplete &&
+            heartComplete &&
             liftingComplete &&
             fastComplete
         );
@@ -567,7 +679,11 @@ export class GoalTrackerApp extends LitElement {
         onChange: (value: YesNo) => void,
         helper?: string,
         disabled = false,
+        tones: ToneMap = { yes: 'good', no: 'bad' },
     ) {
+        const yesTone = tones.yes ?? 'good';
+        const noTone = tones.no ?? 'bad';
+
         return html`
             <div class="yesno">
                 <div class="yesno-label">
@@ -578,7 +694,9 @@ export class GoalTrackerApp extends LitElement {
                 </div>
                 <div class="yesno-buttons" role="group" aria-label=${label}>
                     <button
-                        class="pill ${value === 'yes' ? 'active yes' : ''}"
+                        class="pill ${value === 'yes'
+                            ? `active ${yesTone}`
+                            : ''}"
                         type="button"
                         ?disabled=${disabled}
                         @click=${() => onChange(this.toggleYesNo(value, 'yes'))}
@@ -586,7 +704,7 @@ export class GoalTrackerApp extends LitElement {
                         Yes
                     </button>
                     <button
-                        class="pill ${value === 'no' ? 'active no' : ''}"
+                        class="pill ${value === 'no' ? `active ${noTone}` : ''}"
                         type="button"
                         ?disabled=${disabled}
                         @click=${() => onChange(this.toggleYesNo(value, 'no'))}
@@ -598,13 +716,18 @@ export class GoalTrackerApp extends LitElement {
         `;
     }
 
-    private renderWeightInput(
+    private renderMetricInput(
         label: string,
         value: number | undefined,
         missed: boolean,
         onChange: (value: number | undefined) => void,
         onMissedToggle: () => void,
         disabled = false,
+        options: {
+            placeholder: string;
+            step: string;
+            inputMode: 'decimal' | 'numeric';
+        },
     ) {
         return html`
             <div class="weight-field">
@@ -612,9 +735,9 @@ export class GoalTrackerApp extends LitElement {
                     <span>${label}</span>
                     <input
                         type="number"
-                        step="0.1"
-                        inputmode="decimal"
-                        placeholder="lbs"
+                        step=${options.step}
+                        inputmode=${options.inputMode}
+                        placeholder=${options.placeholder}
                         .value=${value === undefined ? '' : String(value)}
                         ?disabled=${missed || disabled}
                         @input=${(event: Event) => {
@@ -640,7 +763,14 @@ export class GoalTrackerApp extends LitElement {
     }
 
     private renderDietSection(day: DayRecord, date: ISODate) {
-        const dietRulesAllClear = this.dietRulesAllClear(day);
+        const dietComplete = this.isDietSectionComplete(day);
+        const dietPassed =
+            dietComplete && this.dietRequirementSatisfied(day, date);
+        const dietStatusClass = dietComplete
+            ? dietPassed
+                ? 'status-good'
+                : 'status-bad'
+            : '';
         const dessertConflict =
             day.dessertPass === 'yes'
                 ? this.getPassConflict(date, 'dessertPass')
@@ -651,9 +781,22 @@ export class GoalTrackerApp extends LitElement {
                 : null;
         const editKey = this.getEditKey('diet', date);
         const isEditing = this.isEditing(editKey, false);
+        const badFoodTones: ToneMap = { yes: 'bad', no: 'good' };
+        const exceptionTones: ToneMap = { yes: 'bad', no: 'good' };
+        const dessertTones: ToneMap = {
+            yes: dessertConflict ? 'bad' : 'good',
+            no: 'good',
+        };
+        const mealTones: ToneMap = {
+            yes: mealConflict ? 'bad' : 'good',
+            no: 'good',
+        };
 
         return html`
-            <div class="card inset">
+            <div class="card inset diet-card ${dietStatusClass}">
+                ${this.renderEditToggle(isEditing, () =>
+                    this.setEditing(editKey, !isEditing),
+                )}
                 <div class="section-header">
                     <div>
                         <h3>Diet plan</h3>
@@ -665,31 +808,26 @@ export class GoalTrackerApp extends LitElement {
                             Avoid processed keto products. Answer yes if you ate
                             any of the items below.
                         </p>
-                    </div>
-                    <div class="section-actions">
-                        <label class="computed">
-                            <input
-                                type="checkbox"
-                                disabled
-                                .checked=${dietRulesAllClear}
-                            />
-                            Followed diet rules
-                        </label>
-                        <button
-                            class="ghost edit-toggle"
-                            type="button"
-                            @click=${() => this.setEditing(editKey, !isEditing)}
-                        >
-                            ${isEditing ? 'Done' : 'Edit'}
-                        </button>
+                        ${dietComplete
+                            ? html`<div
+                                  class="diet-status ${dietPassed
+                                      ? 'good'
+                                      : 'bad'}"
+                              >
+                                  ${dietPassed
+                                      ? 'Diet plan followed'
+                                      : 'Diet plan failed'}
+                              </div>`
+                            : null}
                     </div>
                 </div>
                 ${this.renderYesNo(
-                    'Did you use the diet exception (friends/family outside wife, dog, work teammates)?',
+                    'Did you violate the diet exception (friends/family outside wife, dog, work teammates)?',
                     day.dietException,
                     (value) => this.setDayValue(date, 'dietException', value),
                     undefined,
                     !isEditing,
+                    exceptionTones,
                 )}
                 ${this.renderYesNo(
                     'Did you use a dessert pass today (1 per week)?',
@@ -697,6 +835,7 @@ export class GoalTrackerApp extends LitElement {
                     (value) => this.setDayValue(date, 'dessertPass', value),
                     undefined,
                     !isEditing,
+                    dessertTones,
                 )}
                 ${this.renderYesNo(
                     'Did you use a meal pass today (1 per week)?',
@@ -704,6 +843,7 @@ export class GoalTrackerApp extends LitElement {
                     (value) => this.setDayValue(date, 'mealPass', value),
                     undefined,
                     !isEditing,
+                    mealTones,
                 )}
                 ${dessertConflict
                     ? html`<div class="warning">
@@ -725,6 +865,7 @@ export class GoalTrackerApp extends LitElement {
                             (value) => this.setDietValue(date, rule.key, value),
                             undefined,
                             !isEditing,
+                            badFoodTones,
                         ),
                     )}
                 </div>
@@ -738,23 +879,17 @@ export class GoalTrackerApp extends LitElement {
 
         return html`
             <div class="card inset">
+                ${this.renderEditToggle(isEditing, () =>
+                    this.setEditing(editKey, !isEditing),
+                )}
                 <div class="section-header">
                     <div>
                         <h3>Weight check-in</h3>
                         <p class="subtle">Morning and night weigh-ins.</p>
                     </div>
-                    <div class="section-actions">
-                        <button
-                            class="ghost edit-toggle"
-                            type="button"
-                            @click=${() => this.setEditing(editKey, !isEditing)}
-                        >
-                            ${isEditing ? 'Done' : 'Edit'}
-                        </button>
-                    </div>
                 </div>
-                <div class="weights">
-                    ${this.renderWeightInput(
+                <div class="metrics">
+                    ${this.renderMetricInput(
                         'Morning',
                         day.weightMorning,
                         day.weightMorningMissed,
@@ -762,8 +897,13 @@ export class GoalTrackerApp extends LitElement {
                             this.setWeightValue(date, 'weightMorning', value),
                         () => this.toggleWeightMissed(date, 'weightMorning'),
                         !isEditing,
+                        {
+                            placeholder: 'lbs',
+                            step: '0.1',
+                            inputMode: 'decimal',
+                        },
                     )}
-                    ${this.renderWeightInput(
+                    ${this.renderMetricInput(
                         'Night',
                         day.weightNight,
                         day.weightNightMissed,
@@ -771,6 +911,52 @@ export class GoalTrackerApp extends LitElement {
                             this.setWeightValue(date, 'weightNight', value),
                         () => this.toggleWeightMissed(date, 'weightNight'),
                         !isEditing,
+                        {
+                            placeholder: 'lbs',
+                            step: '0.1',
+                            inputMode: 'decimal',
+                        },
+                    )}
+                </div>
+            </div>
+        `;
+    }
+
+    private renderHeartSection(day: DayRecord, date: ISODate) {
+        const editKey = this.getEditKey('heart', date);
+        const isEditing = this.isEditing(editKey, false);
+
+        return html`
+            <div class="card inset">
+                ${this.renderEditToggle(isEditing, () =>
+                    this.setEditing(editKey, !isEditing),
+                )}
+                <div class="section-header">
+                    <div>
+                        <h3>Heart rate check-in</h3>
+                        <p class="subtle">Morning and night BPM check.</p>
+                    </div>
+                </div>
+                <div class="metrics">
+                    ${this.renderMetricInput(
+                        'Morning',
+                        day.heartMorning,
+                        day.heartMorningMissed,
+                        (value) =>
+                            this.setHeartValue(date, 'heartMorning', value),
+                        () => this.toggleHeartMissed(date, 'heartMorning'),
+                        !isEditing,
+                        { placeholder: 'bpm', step: '1', inputMode: 'numeric' },
+                    )}
+                    ${this.renderMetricInput(
+                        'Night',
+                        day.heartNight,
+                        day.heartNightMissed,
+                        (value) =>
+                            this.setHeartValue(date, 'heartNight', value),
+                        () => this.toggleHeartMissed(date, 'heartNight'),
+                        !isEditing,
+                        { placeholder: 'bpm', step: '1', inputMode: 'numeric' },
                     )}
                 </div>
             </div>
@@ -865,6 +1051,7 @@ export class GoalTrackerApp extends LitElement {
             <div class="daily-grid">
                 ${this.renderDietSection(day, date)}
                 ${this.renderWeightSection(day, date)}
+                ${this.renderHeartSection(day, date)}
                 ${this.renderLiftingSection(day, date)}
                 ${this.renderFastSection(day, date)}
             </div>
@@ -997,9 +1184,16 @@ export class GoalTrackerApp extends LitElement {
         const selected = new Set(plan.dates);
         const weekEnd = formatDate(addDays(weekStart, 6));
         const warning = plan.dates.length !== 3;
+        const editToggle = showToggle
+            ? this.renderEditToggle(
+                  isEditing,
+                  options?.onToggleEdit ?? (() => {}),
+              )
+            : null;
 
         return html`
             <div class="card inset">
+                ${editToggle}
                 <div class="section-header">
                     <div>
                         <h3>Weekly lifting plan</h3>
@@ -1007,22 +1201,9 @@ export class GoalTrackerApp extends LitElement {
                             Pick exactly three dates for 30+ minutes.
                         </p>
                     </div>
-                    <div class="section-actions">
-                        <div class="range">
-                            ${formatDisplayDate(weekKey)} -
-                            ${formatDisplayDate(weekEnd)}
-                        </div>
-                        ${showToggle
-                            ? html`
-                                  <button
-                                      class="ghost edit-toggle"
-                                      type="button"
-                                      @click=${options?.onToggleEdit}
-                                  >
-                                      ${isEditing ? 'Done' : 'Edit'}
-                                  </button>
-                              `
-                            : null}
+                    <div class="range">
+                        ${formatDisplayDate(weekKey)} -
+                        ${formatDisplayDate(weekEnd)}
                     </div>
                 </div>
                 <label class="planner-label">
@@ -1119,9 +1300,16 @@ export class GoalTrackerApp extends LitElement {
         const breakFastDate = endDate
             ? formatDisplayDate(formatDate(addDays(parseDate(endDate), 1)))
             : '';
+        const editToggle = showToggle
+            ? this.renderEditToggle(
+                  isEditing,
+                  options?.onToggleEdit ?? (() => {}),
+              )
+            : null;
 
         return html`
             <div class="card inset">
+                ${editToggle}
                 <div class="section-header">
                     <div>
                         <h3>Monthly 3-day water-only fast</h3>
@@ -1130,19 +1318,6 @@ export class GoalTrackerApp extends LitElement {
                             days.
                         </p>
                     </div>
-                    ${showToggle
-                        ? html`
-                              <div class="section-actions">
-                                  <button
-                                      class="ghost edit-toggle"
-                                      type="button"
-                                      @click=${options?.onToggleEdit}
-                                  >
-                                      ${isEditing ? 'Done' : 'Edit'}
-                                  </button>
-                              </div>
-                          `
-                        : null}
                 </div>
                 <div class="plan-row">
                     <label class="planner-label">
@@ -1334,7 +1509,7 @@ export class GoalTrackerApp extends LitElement {
                 day.mealPass !== null ||
                 DIET_RULES.some((rule) => day.diet[rule.key] !== null);
             if (!hasData) return null;
-            return this.dietRequirementSatisfied(day) ? 1 : 0;
+            return this.dietRequirementSatisfied(day, date) ? 1 : 0;
         });
 
         const weightValues = dates.map((date) => {
