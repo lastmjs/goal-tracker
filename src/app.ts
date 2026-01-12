@@ -647,6 +647,17 @@ export class GoalTrackerApp extends LitElement {
         return null;
     }
 
+    private getHeartAverage(day: DayRecord): number | null {
+        const morning = day.heartMorning;
+        const night = day.heartNight;
+        if (Number.isFinite(morning) && Number.isFinite(night)) {
+            return ((morning ?? 0) + (night ?? 0)) / 2;
+        }
+        if (Number.isFinite(morning)) return morning ?? null;
+        if (Number.isFinite(night)) return night ?? null;
+        return null;
+    }
+
     private getWeightSeries(): Array<{ date: ISODate; value: number }> {
         const entries = Object.values(this.appState.days)
             .map((day) => ({
@@ -668,6 +679,19 @@ export class GoalTrackerApp extends LitElement {
         const range = buildDateRange(endDate, windowSize);
         const values = range
             .map((date) => this.getDailyAverage(this.getDay(date)))
+            .filter((value): value is number => Number.isFinite(value));
+        if (!values.length) return null;
+        return values.reduce((sum, value) => sum + value, 0) / values.length;
+    }
+
+    private getHeartRollingAverage(
+        currentDate: ISODate,
+        windowSize: number,
+    ): number | null {
+        const endDate = parseDate(currentDate);
+        const range = buildDateRange(endDate, windowSize);
+        const values = range
+            .map((date) => this.getHeartAverage(this.getDay(date)))
             .filter((value): value is number => Number.isFinite(value));
         if (!values.length) return null;
         return values.reduce((sum, value) => sum + value, 0) / values.length;
@@ -1498,6 +1522,54 @@ export class GoalTrackerApp extends LitElement {
         `;
     }
 
+    private renderHeartChart() {
+        const endDate = new Date();
+        const dates = buildDateRange(endDate, CHART_DAYS);
+        const values = dates.map((date) =>
+            this.getHeartAverage(this.getDay(date)),
+        );
+        const rolling = dates.map((date) =>
+            this.getHeartRollingAverage(date, 7),
+        );
+
+        const width = 320;
+        const height = 140;
+        const allValues = [...values, ...rolling].filter(
+            (value): value is number => Number.isFinite(value),
+        );
+        const min = allValues.length ? Math.min(...allValues) : 0;
+        const max = allValues.length ? Math.max(...allValues) : 0;
+        const line = this.buildLinePath(values, width, height, min, max);
+        const smooth = this.buildLinePath(rolling, width, height, min, max);
+
+        return html`
+            <div class="chart-card">
+                <div class="chart-header">
+                    <div>
+                        <h3>Heart rate trend (last ${CHART_DAYS} days)</h3>
+                        <p class="subtle">
+                            Daily average + 7-day rolling average.
+                        </p>
+                    </div>
+                </div>
+                <svg viewBox="0 0 ${width} ${height}" class="weight-chart">
+                    <path
+                        d=${line.path}
+                        stroke="var(--accent)"
+                        stroke-width="2"
+                        fill="none"
+                    />
+                    <path
+                        d=${smooth.path}
+                        stroke="var(--accent-2)"
+                        stroke-width="3"
+                        fill="none"
+                    />
+                </svg>
+            </div>
+        `;
+    }
+
     private renderGoalCharts() {
         const dates = buildDateRange(new Date(), CHART_DAYS);
 
@@ -1725,7 +1797,8 @@ export class GoalTrackerApp extends LitElement {
                         </div>
                     </div>
                     <div class="chart-grid">
-                        ${this.renderWeightChart()} ${this.renderGoalCharts()}
+                        ${this.renderWeightChart()} ${this.renderHeartChart()}
+                        ${this.renderGoalCharts()}
                     </div>
                 </section>
             </div>
