@@ -121,6 +121,20 @@ p {
     margin-bottom: 16px;
 }
 
+.section-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 8px;
+}
+
+.edit-toggle {
+    min-height: 32px;
+    padding: 4px 10px;
+    border-radius: 10px;
+    font-size: 0.85rem;
+}
+
 .subtle {
     color: var(--muted);
     font-size: 0.95rem;
@@ -183,13 +197,18 @@ p {
     flex: 1 1 120px;
 }
 
+.date-nav .ghost,
 .date-nav input[type='date'] {
+    border-radius: 12px;
+    min-height: 36px;
     padding: 6px 10px;
-    border-radius: 10px;
+    font-size: 0.92rem;
+}
+
+.date-nav input[type='date'] {
     border: 1px solid var(--border);
     font-family: inherit;
     background: #fff;
-    min-height: var(--touch);
 }
 
 .ghost {
@@ -314,6 +333,11 @@ p {
     min-height: 40px;
 }
 
+.pill:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
 .pill.active {
     border-color: transparent;
     color: #fff;
@@ -362,6 +386,15 @@ p {
 .pill.missed {
     border-color: var(--border);
     color: var(--muted);
+}
+
+.weight-field .pill.missed {
+    align-self: flex-start;
+    border-radius: 10px;
+    min-height: 32px;
+    padding: 4px 10px;
+    font-size: 0.8rem;
+    flex: 0 0 auto;
 }
 
 .pill.missed.active {
@@ -561,6 +594,11 @@ p {
         align-items: flex-start;
     }
 
+    .section-actions {
+        width: 100%;
+        align-items: flex-start;
+    }
+
     .yesno {
         flex-direction: column;
         align-items: flex-start;
@@ -587,13 +625,18 @@ p {
     }
 
     .date-nav {
-        flex-direction: column;
-        align-items: stretch;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 8px;
+        align-items: center;
     }
 
-    .date-nav button,
     .date-nav input[type='date'] {
-        width: 100%;
+        grid-column: 1 / -1;
+    }
+
+    .date-nav .today {
+        grid-column: 1 / -1;
     }
 
     .yesno-buttons {
@@ -604,6 +647,10 @@ p {
     .pill {
         flex: 1 1 120px;
         min-height: var(--touch);
+    }
+
+    .weight-field .pill.missed {
+        min-height: 34px;
     }
 
     .weights {

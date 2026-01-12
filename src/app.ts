@@ -217,6 +217,9 @@ export class GoalTrackerApp extends LitElement {
     @state()
     private monthFocus: string = getMonthKey(new Date());
 
+    @state()
+    private editMode: Record<string, boolean> = {};
+
     connectedCallback() {
         super.connectedCallback();
         const raw = localStorage.getItem(STORAGE_KEY);
@@ -250,6 +253,21 @@ export class GoalTrackerApp extends LitElement {
                 ...emptyDiet(),
                 ...stored.diet,
             },
+        };
+    }
+
+    private getEditKey(section: string, scope: string): string {
+        return `${section}:${scope}`;
+    }
+
+    private isEditing(key: string, fallback: boolean): boolean {
+        return this.editMode[key] ?? fallback;
+    }
+
+    private setEditing(key: string, value: boolean) {
+        this.editMode = {
+            ...this.editMode,
+            [key]: value,
         };
     }
 
@@ -394,6 +412,25 @@ export class GoalTrackerApp extends LitElement {
         );
     }
 
+    private isDietSectionComplete(day: DayRecord): boolean {
+        const dietExceptionSet = day.dietException !== null;
+        const dietNeedsRules = day.dietException !== 'yes';
+        const dietRulesComplete =
+            !dietNeedsRules || this.dietRulesAnswered(day);
+        const passesAnswered =
+            !dietNeedsRules ||
+            (day.dessertPass !== null && day.mealPass !== null);
+        return dietExceptionSet && dietRulesComplete && passesAnswered;
+    }
+
+    private isWeightSectionComplete(day: DayRecord): boolean {
+        const weightMorningSet =
+            Number.isFinite(day.weightMorning) || day.weightMorningMissed;
+        const weightNightSet =
+            Number.isFinite(day.weightNight) || day.weightNightMissed;
+        return weightMorningSet && weightNightSet;
+    }
+
     private isLiftingDay(date: ISODate): boolean {
         const weekKey = getWeekKey(parseDate(date));
         const plan = this.appState.weekPlans[weekKey];
@@ -407,21 +444,8 @@ export class GoalTrackerApp extends LitElement {
     }
 
     private isDayComplete(day: DayRecord, date: ISODate): boolean {
-        const dietExceptionSet = day.dietException !== null;
-        const dietNeedsRules = day.dietException !== 'yes';
-        const dietRulesComplete =
-            !dietNeedsRules || this.dietRulesAnswered(day);
-        const passesAnswered =
-            !dietNeedsRules ||
-            (day.dessertPass !== null && day.mealPass !== null);
-        const dietSectionComplete =
-            dietExceptionSet && dietRulesComplete && passesAnswered;
-
-        const weightMorningSet =
-            Number.isFinite(day.weightMorning) || day.weightMorningMissed;
-        const weightNightSet =
-            Number.isFinite(day.weightNight) || day.weightNightMissed;
-        const weightsComplete = weightMorningSet && weightNightSet;
+        const dietSectionComplete = this.isDietSectionComplete(day);
+        const weightsComplete = this.isWeightSectionComplete(day);
 
         const liftingRequired = this.isLiftingDay(date);
         const liftingComplete =
@@ -542,6 +566,7 @@ export class GoalTrackerApp extends LitElement {
         value: YesNo,
         onChange: (value: YesNo) => void,
         helper?: string,
+        disabled = false,
     ) {
         return html`
             <div class="yesno">
@@ -555,6 +580,7 @@ export class GoalTrackerApp extends LitElement {
                     <button
                         class="pill ${value === 'yes' ? 'active yes' : ''}"
                         type="button"
+                        ?disabled=${disabled}
                         @click=${() => onChange(this.toggleYesNo(value, 'yes'))}
                     >
                         Yes
@@ -562,6 +588,7 @@ export class GoalTrackerApp extends LitElement {
                     <button
                         class="pill ${value === 'no' ? 'active no' : ''}"
                         type="button"
+                        ?disabled=${disabled}
                         @click=${() => onChange(this.toggleYesNo(value, 'no'))}
                     >
                         No
@@ -577,6 +604,7 @@ export class GoalTrackerApp extends LitElement {
         missed: boolean,
         onChange: (value: number | undefined) => void,
         onMissedToggle: () => void,
+        disabled = false,
     ) {
         return html`
             <div class="weight-field">
@@ -588,7 +616,7 @@ export class GoalTrackerApp extends LitElement {
                         inputmode="decimal"
                         placeholder="lbs"
                         .value=${value === undefined ? '' : String(value)}
-                        ?disabled=${missed}
+                        ?disabled=${missed || disabled}
                         @input=${(event: Event) => {
                             const target = event.target as HTMLInputElement;
                             const next =
@@ -602,6 +630,7 @@ export class GoalTrackerApp extends LitElement {
                 <button
                     class="pill missed ${missed ? 'active' : ''}"
                     type="button"
+                    ?disabled=${disabled}
                     @click=${onMissedToggle}
                 >
                     ${missed ? 'Missed' : 'Mark missed'}
@@ -620,6 +649,8 @@ export class GoalTrackerApp extends LitElement {
             day.mealPass === 'yes'
                 ? this.getPassConflict(date, 'mealPass')
                 : null;
+        const editKey = this.getEditKey('diet', date);
+        const isEditing = this.isEditing(editKey, false);
 
         return html`
             <div class="card inset">
@@ -635,29 +666,44 @@ export class GoalTrackerApp extends LitElement {
                             any of the items below.
                         </p>
                     </div>
-                    <label class="computed">
-                        <input
-                            type="checkbox"
-                            disabled
-                            .checked=${dietRulesAllClear}
-                        />
-                        Followed diet rules
-                    </label>
+                    <div class="section-actions">
+                        <label class="computed">
+                            <input
+                                type="checkbox"
+                                disabled
+                                .checked=${dietRulesAllClear}
+                            />
+                            Followed diet rules
+                        </label>
+                        <button
+                            class="ghost edit-toggle"
+                            type="button"
+                            @click=${() => this.setEditing(editKey, !isEditing)}
+                        >
+                            ${isEditing ? 'Done' : 'Edit'}
+                        </button>
+                    </div>
                 </div>
                 ${this.renderYesNo(
                     'Did you use the diet exception (friends/family outside wife, dog, work teammates)?',
                     day.dietException,
                     (value) => this.setDayValue(date, 'dietException', value),
+                    undefined,
+                    !isEditing,
                 )}
                 ${this.renderYesNo(
                     'Did you use a dessert pass today (1 per week)?',
                     day.dessertPass,
                     (value) => this.setDayValue(date, 'dessertPass', value),
+                    undefined,
+                    !isEditing,
                 )}
                 ${this.renderYesNo(
                     'Did you use a meal pass today (1 per week)?',
                     day.mealPass,
                     (value) => this.setDayValue(date, 'mealPass', value),
+                    undefined,
+                    !isEditing,
                 )}
                 ${dessertConflict
                     ? html`<div class="warning">
@@ -677,6 +723,8 @@ export class GoalTrackerApp extends LitElement {
                             rule.label,
                             day.diet[rule.key],
                             (value) => this.setDietValue(date, rule.key, value),
+                            undefined,
+                            !isEditing,
                         ),
                     )}
                 </div>
@@ -685,12 +733,24 @@ export class GoalTrackerApp extends LitElement {
     }
 
     private renderWeightSection(day: DayRecord, date: ISODate) {
+        const editKey = this.getEditKey('weight', date);
+        const isEditing = this.isEditing(editKey, false);
+
         return html`
             <div class="card inset">
                 <div class="section-header">
                     <div>
                         <h3>Weight check-in</h3>
                         <p class="subtle">Morning and night weigh-ins.</p>
+                    </div>
+                    <div class="section-actions">
+                        <button
+                            class="ghost edit-toggle"
+                            type="button"
+                            @click=${() => this.setEditing(editKey, !isEditing)}
+                        >
+                            ${isEditing ? 'Done' : 'Edit'}
+                        </button>
                     </div>
                 </div>
                 <div class="weights">
@@ -701,6 +761,7 @@ export class GoalTrackerApp extends LitElement {
                         (value) =>
                             this.setWeightValue(date, 'weightMorning', value),
                         () => this.toggleWeightMissed(date, 'weightMorning'),
+                        !isEditing,
                     )}
                     ${this.renderWeightInput(
                         'Night',
@@ -709,6 +770,7 @@ export class GoalTrackerApp extends LitElement {
                         (value) =>
                             this.setWeightValue(date, 'weightNight', value),
                         () => this.toggleWeightMissed(date, 'weightNight'),
+                        !isEditing,
                     )}
                 </div>
             </div>
@@ -918,9 +980,15 @@ export class GoalTrackerApp extends LitElement {
     private renderWeeklyPlan(options?: {
         weekKey?: string;
         lockWeek?: boolean;
+        editing?: boolean;
+        showToggle?: boolean;
+        onToggleEdit?: () => void;
     }) {
         const weekKey = options?.weekKey ?? this.weekFocus;
         const lockWeek = Boolean(options?.lockWeek);
+        const isEditing = options?.editing ?? true;
+        const showToggle = Boolean(options?.showToggle);
+        const disableInputs = !isEditing;
         const weekStart = parseDate(weekKey);
         const weekDates = Array.from({ length: 7 }, (_, index) =>
             formatDate(addDays(weekStart, index)),
@@ -939,9 +1007,22 @@ export class GoalTrackerApp extends LitElement {
                             Pick exactly three dates for 30+ minutes.
                         </p>
                     </div>
-                    <div class="range">
-                        ${formatDisplayDate(weekKey)} -
-                        ${formatDisplayDate(weekEnd)}
+                    <div class="section-actions">
+                        <div class="range">
+                            ${formatDisplayDate(weekKey)} -
+                            ${formatDisplayDate(weekEnd)}
+                        </div>
+                        ${showToggle
+                            ? html`
+                                  <button
+                                      class="ghost edit-toggle"
+                                      type="button"
+                                      @click=${options?.onToggleEdit}
+                                  >
+                                      ${isEditing ? 'Done' : 'Edit'}
+                                  </button>
+                              `
+                            : null}
                     </div>
                 </div>
                 <label class="planner-label">
@@ -949,8 +1030,9 @@ export class GoalTrackerApp extends LitElement {
                     <input
                         type="date"
                         .value=${weekKey}
-                        ?disabled=${lockWeek}
+                        ?disabled=${lockWeek || disableInputs}
                         @change=${(event: Event) => {
+                            if (disableInputs) return;
                             if (lockWeek) return;
                             const target = event.target as HTMLInputElement;
                             if (!target.value) return;
@@ -970,7 +1052,9 @@ export class GoalTrackerApp extends LitElement {
                                 <input
                                     type="checkbox"
                                     .checked=${isSelected}
+                                    ?disabled=${disableInputs}
                                     @change=${(event: Event) => {
+                                        if (disableInputs) return;
                                         const target =
                                             event.target as HTMLInputElement;
                                         const next = new Set(selected);
@@ -1011,9 +1095,15 @@ export class GoalTrackerApp extends LitElement {
     private renderFastPlan(options?: {
         monthKey?: string;
         lockMonth?: boolean;
+        editing?: boolean;
+        showToggle?: boolean;
+        onToggleEdit?: () => void;
     }) {
         const monthKey = options?.monthKey ?? this.monthFocus;
         const lockMonth = Boolean(options?.lockMonth);
+        const isEditing = options?.editing ?? true;
+        const showToggle = Boolean(options?.showToggle);
+        const disableInputs = !isEditing;
         const [year, month] = monthKey.split('-').map(Number);
         const monthIndex = month - 1;
         const daysInMonth = getDaysInMonth(year, monthIndex);
@@ -1040,6 +1130,19 @@ export class GoalTrackerApp extends LitElement {
                             days.
                         </p>
                     </div>
+                    ${showToggle
+                        ? html`
+                              <div class="section-actions">
+                                  <button
+                                      class="ghost edit-toggle"
+                                      type="button"
+                                      @click=${options?.onToggleEdit}
+                                  >
+                                      ${isEditing ? 'Done' : 'Edit'}
+                                  </button>
+                              </div>
+                          `
+                        : null}
                 </div>
                 <div class="plan-row">
                     <label class="planner-label">
@@ -1047,8 +1150,9 @@ export class GoalTrackerApp extends LitElement {
                         <input
                             type="month"
                             .value=${monthKey}
-                            ?disabled=${lockMonth}
+                            ?disabled=${lockMonth || disableInputs}
                             @change=${(event: Event) => {
+                                if (disableInputs) return;
                                 if (lockMonth) return;
                                 const target = event.target as HTMLInputElement;
                                 if (!target.value) return;
@@ -1063,7 +1167,9 @@ export class GoalTrackerApp extends LitElement {
                             min=${minDate}
                             max=${maxDate}
                             .value=${startDate}
+                            ?disabled=${disableInputs}
                             @change=${(event: Event) => {
+                                if (disableInputs) return;
                                 const target = event.target as HTMLInputElement;
                                 if (!target.value) {
                                     this.updateFastPlan(monthKey, []);
@@ -1305,6 +1411,8 @@ export class GoalTrackerApp extends LitElement {
                         ${this.renderFastPlan({
                             monthKey: blocking.monthKey,
                             lockMonth: true,
+                            editing: true,
+                            showToggle: false,
                         })}
                         <div class="overlay-actions">
                             <button
@@ -1340,6 +1448,8 @@ export class GoalTrackerApp extends LitElement {
                         ${this.renderWeeklyPlan({
                             weekKey: blocking.weekKey,
                             lockWeek: true,
+                            editing: true,
+                            showToggle: false,
                         })}
                         <div class="overlay-actions">
                             <button
@@ -1375,6 +1485,10 @@ export class GoalTrackerApp extends LitElement {
 
     render() {
         const blocking = this.getBlockingOverlay();
+        const weekEditKey = this.getEditKey('week', this.weekFocus);
+        const weekEditing = this.isEditing(weekEditKey, false);
+        const monthEditKey = this.getEditKey('month', this.monthFocus);
+        const monthEditing = this.isEditing(monthEditKey, false);
 
         return html`
             <div class="shell">
@@ -1411,7 +1525,20 @@ export class GoalTrackerApp extends LitElement {
                         </div>
                     </div>
                     <div class="plan-grid">
-                        ${this.renderWeeklyPlan()} ${this.renderFastPlan()}
+                        ${this.renderWeeklyPlan({
+                            weekKey: this.weekFocus,
+                            editing: weekEditing,
+                            showToggle: true,
+                            onToggleEdit: () =>
+                                this.setEditing(weekEditKey, !weekEditing),
+                        })}
+                        ${this.renderFastPlan({
+                            monthKey: this.monthFocus,
+                            editing: monthEditing,
+                            showToggle: true,
+                            onToggleEdit: () =>
+                                this.setEditing(monthEditKey, !monthEditing),
+                        })}
                     </div>
                 </section>
 
